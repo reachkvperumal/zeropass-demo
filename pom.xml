@@ -91,12 +91,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- JSON processing -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-
         <!-- Thymeleaf for web templates (optional) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -128,3 +122,4 @@
     </build>
 
 </project>
+
