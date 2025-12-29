@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zero Pass Demo - Login</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 24px; }
+        .card { max-width: 520px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; }
+        .row { display: flex; gap: 12px; margin-top: 10px; }
+        input { width: 100%; padding: 10px; }
+        button { padding: 10px 12px; cursor: pointer; }
+        .muted { color: #6b7280; font-size: 14px; }
+        pre { background: #111827; color: #e5e7eb; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h2>Zero Pass Demo</h2>
+    <p class="muted">Login with password or passkey (WebAuthn).</p>
+
+    <h3>Password login</h3>
+    <form method="post" action="/login">
+        <div class="row">
+            <input name="username" placeholder="Username" autocomplete="username" required />
+        </div>
+        <div class="row">
+            <input name="password" type="password" placeholder="Password" autocomplete="current-password" required />
+        </div>
+        <div class="row">
+            <button type="submit">Sign in</button>
+        </div>
+    </form>
+
+    <hr />
+
+    <h3>Passkey login</h3>
+    <div class="row">
+        <input id="username" placeholder="Username for passkey" autocomplete="username webauthn" />
+        <button id="passkeyBtn" type="button">Use passkey</button>
+    </div>
+
+    <div class="row">
+        <button id="registerPasskeyBtn" type="button">Register passkey</button>
+    </div>
+
+    <p class="muted">
+        Note: a passkey will appear only after you have registered one (attestation/registration step).
+        Also, most browsers require a secure context (https) for WebAuthn; localhost is treated as secure.
+    </p>
+
+    <details>
+        <summary>Debug</summary>
+        <pre id="log"></pre>
+    </details>
+</div>
+
+<script src="/webauthn-safari-shim.js"></script>
+<script>
+    const logEl = document.getElementById('log');
+    const log = (...args) => {
+        const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a, null, 2)).join(' ');
+        logEl.textContent += msg + "\n";
+    };
+
+    // Minimal helpers for base64url
+    function base64UrlToUint8Array(base64Url) {
+        const padding = '='.repeat((4 - (base64Url.length % 4)) % 4);
+        const base64 = (base64Url + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = atob(base64);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+    }
+    function uint8ArrayToBase64Url(bytes) {
+        let binary = '';
+        bytes.forEach(b => binary += String.fromCharCode(b));
+        const base64 = btoa(binary);
+        return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    }
+
+    // WebAuthn4J's endpoints return PublicKeyCredentialRequestOptions.
+    // The binary fields (challenge / allowCredentials[].id) need conversion.
+    function normalizeRequestOptions(opts) {
+        const normalized = { ...opts };
+
+        if (!normalized.rpId) {
+            // For localhost demos, rpId must match effective domain.
+            normalized.rpId = 'localhost';
+        }
+        if (!normalized.timeout) {
+            normalized.timeout = 60000;
+        }
+        if (!normalized.userVerification) {
+            normalized.userVerification = 'preferred';
+        }
+
+        if (normalized.challenge && typeof normalized.challenge === 'string') {
+            normalized.challenge = base64UrlToUint8Array(normalized.challenge);
+        }
+
+        if (normalized.allowCredentials && Array.isArray(normalized.allowCredentials)) {
+            normalized.allowCredentials = normalized.allowCredentials.map(c => ({
+                ...c,
+                id: typeof c.id === 'string' ? base64UrlToUint8Array(c.id) : c.id
+            }));
+        }
+        return normalized;
+    }
+
+    function credentialToJSON(cred) {
+        return {
+            type: cred.type,
+            id: cred.id,
+            rawId: uint8ArrayToBase64Url(new Uint8Array(cred.rawId)),
+            response: {
+                authenticatorData: uint8ArrayToBase64Url(new Uint8Array(cred.response.authenticatorData)),
+                clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(cred.response.clientDataJSON)),
+                signature: uint8ArrayToBase64Url(new Uint8Array(cred.response.signature)),
+                userHandle: cred.response.userHandle ? uint8ArrayToBase64Url(new Uint8Array(cred.response.userHandle)) : null
+            },
+            clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
+        };
+    }
+
+    function asBase64UrlString(maybeBase64OrObject) {
+        if (!maybeBase64OrObject) return null;
+        if (typeof maybeBase64OrObject === 'string') return maybeBase64OrObject;
+        // WebAuthn4J sometimes serializes challenge as { value: "..." }
+        if (typeof maybeBase64OrObject === 'object' && typeof maybeBase64OrObject.value === 'string') {
+            return maybeBase64OrObject.value;
+        }
+        return null;
+    }
+
+    function base64ToUint8Array(base64) {
+        const raw = atob(base64);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+    }
+
+    function debugType(v) {
+        if (v === null) return 'null';
+        if (v === undefined) return 'undefined';
+        if (v instanceof Uint8Array) return 'Uint8Array(' + v.byteLength + ')';
+        if (v instanceof ArrayBuffer) return 'ArrayBuffer(' + v.byteLength + ')';
+        if (Array.isArray(v)) return 'Array[' + v.length + ']';
+        return typeof v;
+    }
+
+    function normalizeCreationOptions(opts) {
+        const normalized = { ...opts };
+
+        if (!normalized.rp) {
+            normalized.rp = { id: 'localhost', name: 'zero pass demo' };
+        }
+
+        // Required by WebAuthn: pubKeyCredParams must be a sequence (array) of algorithms.
+        // Some servers may omit it; in that case we provide a safe default.
+        if (!Array.isArray(normalized.pubKeyCredParams) || normalized.pubKeyCredParams.length === 0) {
+            normalized.pubKeyCredParams = [
+                { type: 'public-key', alg: -7 },   // ES256
+                { type: 'public-key', alg: -257 }  // RS256
+            ];
+        }
+
+        // challenge might be a string or { value: string }
+        const challengeStr = asBase64UrlString(normalized.challenge);
+        if (challengeStr) {
+            // WebAuthn4J may encode as standard base64 ("+") not base64url.
+            const isBase64Url = challengeStr.includes('-') || challengeStr.includes('_');
+            normalized.challenge = isBase64Url ? base64UrlToUint8Array(challengeStr) : base64ToUint8Array(challengeStr);
+        }
+
+        if (normalized.user && normalized.user.id && typeof normalized.user.id === 'string') {
+            const idStr = normalized.user.id;
+            const isBase64Url = idStr.includes('-') || idStr.includes('_');
+            normalized.user = { ...normalized.user, id: isBase64Url ? base64UrlToUint8Array(idStr) : base64ToUint8Array(idStr) };
+        }
+
+        if (normalized.excludeCredentials && Array.isArray(normalized.excludeCredentials)) {
+            normalized.excludeCredentials = normalized.excludeCredentials.map(c => {
+                // id may be base64url or base64
+                if (typeof c.id === 'string') {
+                    const isBase64Url = c.id.includes('-') || c.id.includes('_');
+                    return { ...c, id: isBase64Url ? base64UrlToUint8Array(c.id) : base64ToUint8Array(c.id) };
+                }
+                return {
+                    ...c,
+                    id: typeof c.id === 'string' ? base64UrlToUint8Array(c.id) : c.id
+                };
+            });
+        }
+
+        return normalized;
+    }
+
+    function credentialCreateToJSON(cred) {
+        return {
+            id: cred.id,
+            rawId: uint8ArrayToBase64Url(new Uint8Array(cred.rawId)),
+            type: cred.type,
+            response: {
+                clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(cred.response.clientDataJSON)),
+                attestationObject: uint8ArrayToBase64Url(new Uint8Array(cred.response.attestationObject))
+            },
+            clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
+        };
+    }
+
+    async function doPasskeyLogin() {
+        if (!window.PublicKeyCredential) {
+            alert('WebAuthn not supported in this browser');
+            return;
+        }
+
+        // Optional: check availability of platform authenticator
+        try {
+            const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+            log('platform authenticator available:', available);
+        } catch (e) {
+            log('platform authenticator check failed:', e.message);
+        }
+
+        const username = document.getElementById('username').value || '';
+
+        // 1) Get assertion options
+        const optionsRes = await fetch('/webauthn/assertion/options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        });
+
+        if (!optionsRes.ok) {
+            const t = await optionsRes.text();
+            throw new Error('Failed to get assertion options: ' + t);
+        }
+
+        const options = await optionsRes.json();
+        log('assertion options:', options);
+
+        // If allowCredentials is empty, most browsers will still allow discovery (resident key)
+        // but only if a passkey exists for this RP on the device. If none exists, the browser
+        // typically throws NotAllowedError.
+        if (Array.isArray(options.allowCredentials) && options.allowCredentials.length === 0) {
+            log('note: allowCredentials is empty; this is OK for discoverable credentials, but only if a passkey is already registered for this RP.');
+        }
+
+        // 2) Call WebAuthn API
+        const publicKey = normalizeRequestOptions(options);
+        const cred = await navigator.credentials.get({ publicKey });
+        log('credential obtained');
+
+        // 3) Post the assertion to the login processing endpoint
+        // WebAuthn4J's WebAuthnProcessingFilter expects form fields, so we submit as application/x-www-form-urlencoded.
+        const payload = credentialToJSON(cred);
+        const form = new URLSearchParams();
+
+        // These parameter names match WebAuthnLoginConfigurer defaults in WebAuthn4J.
+        // If you ever customize them in SecurityConfig, update them here too.
+        form.set('username', username);
+        form.set('credentialId', payload.rawId);
+        form.set('clientDataJSON', payload.response.clientDataJSON);
+        form.set('authenticatorData', payload.response.authenticatorData);
+        form.set('signature', payload.response.signature);
+        if (payload.response.userHandle) {
+            form.set('userHandle', payload.response.userHandle);
+        }
+
+        const loginRes = await fetch('/login/webauthn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: form.toString(),
+            redirect: 'follow'
+        });
+
+        log('login status:', loginRes.status);
+
+        if (loginRes.ok) {
+            // If we ended up on a page, replace the current URL.
+            window.location.href = '/hello';
+        } else {
+            const t = await loginRes.text();
+            throw new Error('Passkey login failed: ' + t);
+        }
+    }
+
+    async function doPasskeyRegistration() {
+        if (!window.PublicKeyCredential) {
+            alert('WebAuthn not supported in this browser');
+            return;
+        }
+
+        const username = document.getElementById('username').value || '';
+        if (!username) {
+            alert('Enter a username first (same username you will use to login)');
+            return;
+        }
+
+        // 1) Ask server for creation options
+        const optionsRes = await fetch('/webauthn/attestation/options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        });
+
+        if (!optionsRes.ok) {
+            const t = await optionsRes.text();
+            throw new Error('Failed to get attestation options: ' + t);
+        }
+
+        const options = await optionsRes.json();
+        log('attestation options:', options);
+
+        // Safari compatibility:
+        // - challenge may be {value:...}
+        // - user.id is base64
+        // - optional keys set to null can trigger generic TypeError
+        const publicKey = (window.ZeroPassWebAuthn && window.ZeroPassWebAuthn.normalizeCreationOptions)
+            ? window.ZeroPassWebAuthn.normalizeCreationOptions(options)
+            : normalizeCreationOptions(options);
+
+        // Debug: prove required members are correct types before calling WebAuthn
+        log('publicKey.challenge type:', debugType(publicKey.challenge));
+        log('publicKey.user type:', debugType(publicKey.user));
+        log('publicKey.user.id type:', publicKey.user ? debugType(publicKey.user.id) : 'missing');
+        log('publicKey.pubKeyCredParams type:', debugType(publicKey.pubKeyCredParams));
+        log('publicKey.excludeCredentials type:', debugType(publicKey.excludeCredentials));
+
+        // 2) Create credential
+        const cred = await navigator.credentials.create({ publicKey });
+        log('registration credential created');
+
+        // 3) Send result to server to validate + persist
+        const payload = credentialCreateToJSON(cred);
+        const resultRes = await fetch('/webauthn/attestation/result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username,
+                clientDataJSON: payload.response.clientDataJSON,
+                attestationObject: payload.response.attestationObject,
+                // no transports detected safely from browser; keep null
+                transports: null,
+                clientExtensionsJSON: JSON.stringify(payload.clientExtensionResults || {})
+            })
+        });
+
+        const resultText = await resultRes.text();
+        log('registration result:', resultRes.status, resultText);
+
+        if (!resultRes.ok) {
+            throw new Error('Passkey registration failed: ' + resultText);
+        }
+
+        // After registration, immediately route to hello (user is authenticated via session)
+        // If you prefer forcing passkey login after registration, remove this redirect.
+        window.location.href = '/hello';
+    }
+
+    document.getElementById('passkeyBtn').addEventListener('click', async () => {
+        try {
+            await doPasskeyLogin();
+        } catch (e) {
+            console.error(e);
+            log('ERROR:', e.message);
+            alert(e.message);
+        }
+    });
+
+    document.getElementById('registerPasskeyBtn').addEventListener('click', async () => {
+        try {
+            await doPasskeyRegistration();
+        } catch (e) {
+            console.error(e);
+            log('ERROR:', (e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : String(e)));
+            if (e && e.stack) {
+                log(e.stack);
+            }
+            alert((e && e.message) ? e.message : String(e));
+        }
+    });
+</script>
+</body>
+</html>
+

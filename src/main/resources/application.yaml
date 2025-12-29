@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: zero-pass-demo
+  security:
+    user:
+      name: ${SPRING_SECURITY_USER_NAME:user}
+      password: ${SPRING_SECURITY_USER_PASSWORD:password}
+
+app:
+  security:
+    user:
+      name: ${APP_SECURITY_USER_NAME:${SPRING_SECURITY_USER_NAME:user}}
+      password: ${APP_SECURITY_USER_PASSWORD:${SPRING_SECURITY_USER_PASSWORD:password}}
+
+webauthn:
+  rp-id: localhost
+  rp-name: zero pass demo
+  allowed-origins:
+    - http://localhost:8080
