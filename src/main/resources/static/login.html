@@ -223,7 +223,8 @@
             log('platform authenticator check failed:', e.message);
         }
 
-        const username = document.getElementById('username').value || '';
+        const username = (document.getElementById('username').value || '').trim();
+        log('passkey login username:', username);
 
         // 1) Get assertion options
         const optionsRes = await fetch('/webauthn/assertion/options', {
@@ -292,11 +293,11 @@
             return;
         }
 
-        const username = document.getElementById('username').value || '';
-        if (!username) {
-            alert('Enter a username first (same username you will use to login)');
-            return;
-        }
+        const username = (document.getElementById('username').value || '').trim();
+         if (!username) {
+             alert('Enter a username first (same username you will use to login)');
+             return;
+         }
 
         // 1) Ask server for creation options
         const optionsRes = await fetch('/webauthn/attestation/options', {
