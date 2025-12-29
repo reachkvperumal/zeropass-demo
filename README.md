@@ -55,7 +55,16 @@ The application is configured via `src/main/resources/application.yml`:
 - **Server Port**: 8080
 - **Database**: H2 in-memory database
 - **H2 Console**: Available at `/h2-console`
-- **Default Credentials**: admin/admin (Development only - configure secure credentials for production)
+- **Security Credentials**: Configurable via environment variables
+  - `SPRING_SECURITY_USER_NAME` (defaults to 'admin')
+  - `SPRING_SECURITY_USER_PASSWORD` (defaults to 'admin')
+
+### Environment Variables
+For production deployments, set secure credentials using environment variables:
+```bash
+export SPRING_SECURITY_USER_NAME=your_username
+export SPRING_SECURITY_USER_PASSWORD=your_secure_password
+```
 
 ## Key Dependencies
 

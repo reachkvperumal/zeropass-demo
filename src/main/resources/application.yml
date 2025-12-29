@@ -23,8 +23,8 @@ spring:
   
   security:
     user:
-      name: admin
-      password: admin  # Development only - DO NOT use in production
+      name: ${SPRING_SECURITY_USER_NAME:admin}
+      password: ${SPRING_SECURITY_USER_PASSWORD:admin}
 
 server:
   port: 8080
