@@ -1,5 +1,5 @@
 # zeropass-demo
-Spring Boot Demo - ZeroPass with Passkey &amp; WebAuthn
+Spring Boot Demo - ZeroPass with Passkey & WebAuthn
 
 ## Overview
 This is a Spring Boot application demonstrating Passkey and WebAuthn authentication capabilities using WebAuthn4J library.
@@ -55,7 +55,7 @@ The application is configured via `src/main/resources/application.yml`:
 - **Server Port**: 8080
 - **Database**: H2 in-memory database
 - **H2 Console**: Available at `/h2-console`
-- **Default Credentials**: admin/admin
+- **Default Credentials**: admin/admin (Development only - configure secure credentials for production)
 
 ## Key Dependencies
 

@@ -24,7 +24,7 @@ spring:
   security:
     user:
       name: admin
-      password: admin
+      password: admin  # Development only - DO NOT use in production
 
 server:
   port: 8080
