@@ -1,6 +1,7 @@
 package com.kv.zeropass.config;
 
 import com.webauthn4j.WebAuthnManager;
+import com.webauthn4j.springframework.security.WebAuthnAuthenticationProvider;
 import com.webauthn4j.springframework.security.config.configurers.WebAuthnLoginConfigurer;
 import com.webauthn4j.springframework.security.credential.InMemoryWebAuthnCredentialRecordManager;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -61,6 +62,7 @@ public class SecurityConfig {
     private static final String WEBAUTHN_ATTESTATION_RESULT = "/webauthn/attestation/result";
     private static final String WEBAUTHN_DEBUG_ENDPOINT_PATTERN = "/webauthn/debug/**";
     private static final String WEBAUTHN_ATTESTATION_OPTIONS_INTERNAL_URL = "/webauthn/attestation/options/internal";
+    private static final String WEBAUTHN_ASSERTION_OPTIONS_INTERNAL_URL = "/webauthn/assertion/options/internal";
 
     private static final String LOGIN_PAGE_PATH = "/login";
     private static final String LOGIN_PAGE_STATIC_PATH = "/login.html";
@@ -76,7 +78,8 @@ public class SecurityConfig {
     private static final String ROOT_PATH = "/";
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, WebAuthnProperties webAuthnProps) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, WebAuthnProperties webAuthnProps,
+                                                   WebAuthnAuthenticationProvider webAuthnAuthenticationProvider) throws Exception {
         WebAuthnLoginConfigurer<HttpSecurity> webAuthn = WebAuthnLoginConfigurer.webAuthnLogin()
                 .rpId(webAuthnProps.getRpId());
 
@@ -94,10 +97,12 @@ public class SecurityConfig {
                 .and();
 
         webAuthn.assertionOptionsEndpoint()
+                .processingUrl(WEBAUTHN_ASSERTION_OPTIONS_INTERNAL_URL)
                 .rpId(webAuthnProps.getRpId())
                 .and();
 
         http
+                .authenticationProvider(webAuthnAuthenticationProvider)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(webAuthnProps)))
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
@@ -125,6 +130,11 @@ public class SecurityConfig {
                         .loginPage(LOGIN_PAGE_PATH)
                         .loginProcessingUrl(WEBAUTHN_LOGIN_PROCESSING_URL)
                         .defaultSuccessUrl(DEFAULT_SUCCESS_URL, true)
+                        .failureHandler((request, response, exception) -> {
+                            org.slf4j.LoggerFactory.getLogger("WebAuthnAuth")
+                                    .error("WebAuthn login failed", exception);
+                            response.sendRedirect(LOGIN_PAGE_PATH + "?error");
+                        })
                 );
 
         return http.build();
@@ -139,6 +149,13 @@ public class SecurityConfig {
     @Bean
     public WebAuthnManager webAuthnManager() {
         return WebAuthnManager.createNonStrictWebAuthnManager();
+    }
+
+    @Bean
+    public WebAuthnAuthenticationProvider webAuthnAuthenticationProvider(
+            InMemoryWebAuthnCredentialRecordManager credentialRecordManager,
+            WebAuthnManager webAuthnManager) {
+        return new WebAuthnAuthenticationProvider(credentialRecordManager, webAuthnManager);
     }
 
     @Bean

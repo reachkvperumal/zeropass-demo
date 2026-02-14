@@ -14,6 +14,7 @@ import jakarta.servlet.http.HttpSession;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
@@ -60,9 +61,22 @@ public class RegistrationController {
 
     // Form-based registration: the browser handles cookies and redirects natively,
     // which is more reliable in incognito / private browsing mode than fetch.
+    // Uses @RequestParam because RegistrationRequest has public fields (no setters),
+    // which works for Jackson (JSON) but not for Spring MVC's form data binder.
     @PostMapping(value = "/attestation/result", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-    public ResponseEntity<Void> registerForm(RegistrationRequest request,
-                                             HttpServletRequest httpServletRequest) {
+    public ResponseEntity<Void> registerForm(
+            @RequestParam String username,
+            @RequestParam String clientDataJSON,
+            @RequestParam String attestationObject,
+            @RequestParam(required = false) Set<String> transports,
+            @RequestParam(required = false) String clientExtensionsJSON,
+            HttpServletRequest httpServletRequest) {
+        RegistrationRequest request = new RegistrationRequest();
+        request.username = username;
+        request.clientDataJSON = clientDataJSON;
+        request.attestationObject = attestationObject;
+        request.transports = transports;
+        request.clientExtensionsJSON = clientExtensionsJSON;
         doRegister(request, httpServletRequest);
         return ResponseEntity.status(HttpStatus.FOUND)
                 .header("Location", HELLO_URL)

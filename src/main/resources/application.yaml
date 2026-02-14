@@ -17,3 +17,8 @@ webauthn:
   rp-name: zero pass demo
   allowed-origins:
     - http://localhost:8080
+
+logging:
+  level:
+    com.webauthn4j: DEBUG
+    org.springframework.security: DEBUG

@@ -95,15 +95,25 @@
             normalized.userVerification = 'preferred';
         }
 
-        if (normalized.challenge && typeof normalized.challenge === 'string') {
-            normalized.challenge = base64UrlToUint8Array(normalized.challenge);
+        // challenge may be a plain string or { value: "..." }
+        const challengeStr = asBase64UrlString(normalized.challenge);
+        if (challengeStr) {
+            const isBase64Url = challengeStr.includes('-') || challengeStr.includes('_');
+            normalized.challenge = isBase64Url ? base64UrlToUint8Array(challengeStr) : base64ToUint8Array(challengeStr);
         }
 
         if (normalized.allowCredentials && Array.isArray(normalized.allowCredentials)) {
-            normalized.allowCredentials = normalized.allowCredentials.map(c => ({
-                ...c,
-                id: typeof c.id === 'string' ? base64UrlToUint8Array(c.id) : c.id
-            }));
+            normalized.allowCredentials = normalized.allowCredentials.map(c => {
+                const entry = {
+                    ...c,
+                    id: typeof c.id === 'string' ? base64UrlToUint8Array(c.id) : c.id
+                };
+                // Remove null transports — browsers reject non-array values
+                if (!Array.isArray(entry.transports)) {
+                    delete entry.transports;
+                }
+                return entry;
+            });
         }
         return normalized;
     }
