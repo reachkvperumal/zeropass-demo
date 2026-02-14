@@ -12,6 +12,7 @@ import com.webauthn4j.springframework.security.credential.WebAuthnCredentialReco
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -32,6 +33,7 @@ import java.util.Set;
 public class RegistrationController {
 
     private static final String REGISTERED_RESPONSE = "REGISTERED";
+    private static final String HELLO_URL = "/hello";
 
     private static final String ROLE_USER = "ROLE_USER";
 
@@ -44,46 +46,59 @@ public class RegistrationController {
         this.credentialRecordManager = credentialRecordManager;
     }
 
-    @PostMapping("/attestation/result")
+    @PostMapping(value = "/attestation/result", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> register(@RequestBody RegistrationRequest request,
                                            HttpServletRequest httpServletRequest) {
         try {
-            WebAuthnRegistrationRequestValidationResponse response = registrationRequestValidator.validate(
-                    httpServletRequest,
-                    request.clientDataJSON,
-                    request.attestationObject,
-                    request.transports,
-                    request.clientExtensionsJSON
-            );
-
-            CollectedClientData collectedClientData = response.getCollectedClientData();
-            AttestationObject attestationObject = response.getAttestationObject();
-            AuthenticationExtensionsClientOutputs<RegistrationExtensionClientOutput> clientOutputs = response.getRegistrationExtensionsClientOutputs();
-            Set<AuthenticatorTransport> transports = response.getTransports();
-
-            // For demo purposes, use username as both name and userPrincipal.
-            Serializable userPrincipal = request.username;
-
-            WebAuthnCredentialRecordImpl record = new WebAuthnCredentialRecordImpl(
-                    request.username,
-                    userPrincipal,
-                    attestationObject,
-                    collectedClientData,
-                    clientOutputs,
-                    transports
-            );
-
-            credentialRecordManager.createCredentialRecord(record);
-
-            // Demo convenience: auto-login after successful registration.
-            authenticateIntoSession(request.username, httpServletRequest);
-
+            doRegister(request, httpServletRequest);
             return ResponseEntity.ok(REGISTERED_RESPONSE);
         } catch (RuntimeException e) {
-            // WebAuthn4J wraps WebAuthnException to RuntimeException; return message for demo
             String message = e.getMessage() != null ? e.getMessage() : "Registration failed";
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(message);
         }
+    }
+
+    // Form-based registration: the browser handles cookies and redirects natively,
+    // which is more reliable in incognito / private browsing mode than fetch.
+    @PostMapping(value = "/attestation/result", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    public ResponseEntity<Void> registerForm(RegistrationRequest request,
+                                             HttpServletRequest httpServletRequest) {
+        doRegister(request, httpServletRequest);
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", HELLO_URL)
+                .build();
+    }
+
+    private void doRegister(RegistrationRequest request, HttpServletRequest httpServletRequest) {
+        WebAuthnRegistrationRequestValidationResponse response = registrationRequestValidator.validate(
+                httpServletRequest,
+                request.clientDataJSON,
+                request.attestationObject,
+                request.transports,
+                request.clientExtensionsJSON
+        );
+
+        CollectedClientData collectedClientData = response.getCollectedClientData();
+        AttestationObject attestationObject = response.getAttestationObject();
+        AuthenticationExtensionsClientOutputs<RegistrationExtensionClientOutput> clientOutputs = response.getRegistrationExtensionsClientOutputs();
+        Set<AuthenticatorTransport> transports = response.getTransports();
+
+        // For demo purposes, use username as both name and userPrincipal.
+        Serializable userPrincipal = request.username;
+
+        WebAuthnCredentialRecordImpl record = new WebAuthnCredentialRecordImpl(
+                request.username,
+                userPrincipal,
+                attestationObject,
+                collectedClientData,
+                clientOutputs,
+                transports
+        );
+
+        credentialRecordManager.createCredentialRecord(record);
+
+        // Demo convenience: auto-login after successful registration.
+        authenticateIntoSession(request.username, httpServletRequest);
     }
 
     private static void authenticateIntoSession(String username, HttpServletRequest request) {

@@ -196,6 +196,24 @@
         return normalized;
     }
 
+    // Submit a native HTML form so the browser handles cookies and redirects reliably
+    // (fetch responses may not persist Set-Cookie in incognito / private browsing).
+    function submitHiddenForm(action, fields) {
+        const formEl = document.createElement('form');
+        formEl.method = 'POST';
+        formEl.action = action;
+        for (const [name, value] of Object.entries(fields)) {
+            if (value == null) continue;
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.value = value;
+            formEl.appendChild(input);
+        }
+        document.body.appendChild(formEl);
+        formEl.submit();
+    }
+
     function credentialCreateToJSON(cred) {
         return {
             id: cred.id,
@@ -253,38 +271,20 @@
         const cred = await navigator.credentials.get({ publicKey });
         log('credential obtained');
 
-        // 3) Post the assertion to the login processing endpoint
-        // WebAuthn4J's WebAuthnProcessingFilter expects form fields, so we submit as application/x-www-form-urlencoded.
+        // 3) Post the assertion to the login processing endpoint via native form submission.
+        // Using a real form (not fetch) ensures the browser persists the session cookie
+        // reliably, including in incognito / private browsing mode.
         const payload = credentialToJSON(cred);
-        const form = new URLSearchParams();
-
-        // These parameter names match WebAuthnLoginConfigurer defaults in WebAuthn4J.
-        // If you ever customize them in SecurityConfig, update them here too.
-        form.set('username', username);
-        form.set('credentialId', payload.rawId);
-        form.set('clientDataJSON', payload.response.clientDataJSON);
-        form.set('authenticatorData', payload.response.authenticatorData);
-        form.set('signature', payload.response.signature);
-        if (payload.response.userHandle) {
-            form.set('userHandle', payload.response.userHandle);
-        }
-
-        const loginRes = await fetch('/login/webauthn', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: form.toString(),
-            redirect: 'follow'
-        });
-
-        log('login status:', loginRes.status);
-
-        if (loginRes.ok) {
-            // If we ended up on a page, replace the current URL.
-            window.location.href = '/hello';
-        } else {
-            const t = await loginRes.text();
-            throw new Error('Passkey login failed: ' + t);
-        }
+        const fields = {
+            username,
+            credentialId: payload.rawId,
+            clientDataJSON: payload.response.clientDataJSON,
+            authenticatorData: payload.response.authenticatorData,
+            signature: payload.response.signature,
+            userHandle: payload.response.userHandle
+        };
+        log('submitting login form');
+        submitHiddenForm('/login/webauthn', fields);
     }
 
     async function doPasskeyRegistration() {
@@ -333,31 +333,18 @@
         const cred = await navigator.credentials.create({ publicKey });
         log('registration credential created');
 
-        // 3) Send result to server to validate + persist
+        // 3) Send result to server via native form submission.
+        // Using a real form (not fetch) ensures the browser persists the session cookie
+        // reliably, including in incognito / private browsing mode.
+        // The server validates, auto-authenticates, and redirects to /hello.
         const payload = credentialCreateToJSON(cred);
-        const resultRes = await fetch('/webauthn/attestation/result', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                username,
-                clientDataJSON: payload.response.clientDataJSON,
-                attestationObject: payload.response.attestationObject,
-                // no transports detected safely from browser; keep null
-                transports: null,
-                clientExtensionsJSON: JSON.stringify(payload.clientExtensionResults || {})
-            })
+        log('submitting registration form');
+        submitHiddenForm('/webauthn/attestation/result', {
+            username,
+            clientDataJSON: payload.response.clientDataJSON,
+            attestationObject: payload.response.attestationObject,
+            clientExtensionsJSON: JSON.stringify(payload.clientExtensionResults || {})
         });
-
-        const resultText = await resultRes.text();
-        log('registration result:', resultRes.status, resultText);
-
-        if (!resultRes.ok) {
-            throw new Error('Passkey registration failed: ' + resultText);
-        }
-
-        // After registration, immediately route to hello (user is authenticated via session)
-        // If you prefer forcing passkey login after registration, remove this redirect.
-        window.location.href = '/hello';
     }
 
     document.getElementById('passkeyBtn').addEventListener('click', async () => {
