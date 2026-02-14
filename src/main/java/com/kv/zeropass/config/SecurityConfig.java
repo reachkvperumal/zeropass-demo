@@ -124,7 +124,7 @@ public class SecurityConfig {
                 .with(webAuthn, c -> c
                         .loginPage(LOGIN_PAGE_PATH)
                         .loginProcessingUrl(WEBAUTHN_LOGIN_PROCESSING_URL)
-                        .successForwardUrl(DEFAULT_SUCCESS_URL)
+                        .defaultSuccessUrl(DEFAULT_SUCCESS_URL, true)
                 );
 
         return http.build();
